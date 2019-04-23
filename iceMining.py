@@ -146,6 +146,7 @@ class WhereAmI():
         self.tasks = ['test']#'find human']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
         self.location = 'start' #can be start, intermediate, end
         self.commandExcecuted=False
+        self.foundColor=False
         self.timeStart = time.time()
 
         # initializes tangobot driver
@@ -207,7 +208,43 @@ class WhereAmI():
 
 
     def detectBall(self,frame):
-        pass
+        #Human should have already been found
+        self.bot.moveArm("open")
+        self.bot.moveArm("extend")
+        kernelOpen=np.ones((5,5))
+        kernelClose=np.ones((20,20))
+        #pink boundaries
+        upperPink=np.array([180,255,255])
+        lowerPink=np.array([100,100,100])
+        imgHSV= cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
+        # create the Mask
+        mask=cv2.inRange(imgHSV,lowerPink,upperPink)
+        #morphology
+        maskOpen=cv2.morphologyEx(mask,cv2.MORPH_OPEN,kernelOpen)
+        maskClose=cv2.morphologyEx(maskOpen,cv2.MORPH_CLOSE,kernelClose)
+
+        maskFinal=maskClose
+        conts,h=cv2.findContours(maskFinal.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+    
+        cv2.drawContours(frame,conts,-1,(255,0,0),3)
+        print(len(conts))
+        if len(conts) == 1:
+            count +=1
+            print(count)
+            foundColor = True
+            for i in range(len(conts)):
+                x,y,w,h=cv2.boundingRect(conts[i])
+        else:
+            foundColor = False
+
+        if foundColor == False:
+            count = 0
+        else if foundColor == True and count == 75:
+            self.bot.moveArm("close")
+            self.bot.moveArm("retract")
+            self.tasks=self.tasks[1:]
+            self.phone.sendData("Thank you for your service")
+
     def dropPayload(self,frame):
         pass
 
