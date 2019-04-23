@@ -146,7 +146,7 @@ class WhereAmI():
         self.tasks = ['test']#'find human']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
         self.location = 'start' #can be start, intermediate, end
         self.commandExcecuted=False
-        self.foundColor=False
+        self.found=False
         self.timeStart = time.time()
 
         # initializes tangobot driver
@@ -231,18 +231,18 @@ class WhereAmI():
         if len(conts) == 1:
             count +=1
             print(count)
-            foundColor = True
+            self.found = True
             for i in range(len(conts)):
                 x,y,w,h=cv2.boundingRect(conts[i])
         else:
-            foundColor = False
+            self.found = False
 
-        if foundColor == True and count == 75:
+        if self.found == True and count == 75:
             self.bot.moveArm("close")
             self.bot.moveArm("retract")
             self.tasks=self.tasks[1:]
             self.phone.sendData("Thank you for your service")
-            
+
         else if foundColor == False:
             count = 0
 
