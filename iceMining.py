@@ -113,15 +113,22 @@ class RobotDriver():
             #print(self.motorValues[i])
             self.tango.setTarget(self.motorList[i], self.motorValues[i])
 
-    def tiltHead(self, pos):
+    def tiltHead(self, pos, turn):
         if pos == 'low':
             self.headTilt = 4000  #maybe 8000?
         if pos == 'mid':
             self.headTilt = 6000
         if pos == 'high':
             self.headTilt = 7400 #0r 4600
+        if turn == 'center':
+            self.headTurn= 6000
+        if turn == 'left':
+            self.headTurn = 6800
+        if turn == 'right':
+            self.headTurn = 5200
         self.motorValues=[self.motors, self.turn, self.body, self.headTilt, self.headTurn, self.arm, self.hand]
         self.tango.setTarget(self.motorList[3], self.motorValues[3])
+        self.tango.setTarget(self.motorList[4], self.motorValues[4])
 
     def moveArm(self, action):
         if action == 'extend':
@@ -129,9 +136,9 @@ class RobotDriver():
         if action == 'retract':
             self.arm = 4000
         if action == 'close':
-            self.hand = 7400
+            self.hand = 3000
         if action == 'open':
-            self.hand = 5000
+            self.hand = 1000
         self.motorValues=[self.motors, self.turn, self.body, self.headTilt, self.headTurn, self.arm, self.hand]
         self.tango.setTarget(self.motorList[5], self.motorValues[5])
         self.tango.setTarget(self.motorList[6], self.motorValues[6])
@@ -145,11 +152,12 @@ class WhereAmI():
         self.fps = 0.8  #feet per second (.8fps at default)
         self.dps = -1  #degrees per second
         self.hasIce = False
-        self.tasks = ['find human']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
+        self.tasks = ['verify color']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
         self.location = 'start' #can be start, intermediate, end
         self.commandExcecuted=False
         self.found=False
         self.timeStart = time.time()
+        self.count = 0
 
         # initializes tangobot driver
         # Value Reminders: MOTORS = 1  TURN = 2  BODY = 0  HEADTILT = 4  HEADTURN = 3
@@ -201,7 +209,7 @@ class WhereAmI():
         for (x,y,w,h) in faces:
             cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0))
 
-        self.bot.tiltHead('high')
+        self.bot.tiltHead('high', 'center')
 
         if self.angle>=170:
             self.bot.rotate(self.angle,-180,self.dps)
@@ -220,6 +228,14 @@ class WhereAmI():
         #Human should have already been found
         self.bot.moveArm("open")
         self.bot.moveArm("extend")
+        self.bot.tiltHead("low", 'right')
+
+        brightness=40
+        frame=np.int16(frame)
+        frame=frame-brightness
+        frame=np.clip(frame,0,255)
+        frame=np.uint8(frame)
+
         kernelOpen=np.ones((5,5))
         kernelClose=np.ones((20,20))
         #pink boundaries
@@ -236,24 +252,27 @@ class WhereAmI():
         conts,h=cv2.findContours(maskFinal.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
 
         cv2.drawContours(frame,conts,-1,(255,0,0),3)
-        print(len(conts))
-        if len(conts) == 1:
-            count +=1
-            print(count)
+        cv2.imshow('test',frame)
+        #print(len(conts))
+        if len(conts) >= 1:
+            self.count +=1
+            #print(self.count)
             self.found = True
             for i in range(len(conts)):
                 x,y,w,h=cv2.boundingRect(conts[i])
         else:
             self.found = False
 
-        if self.found == True and count == 75:
+        if self.found == True and self.count == 32:
             self.bot.moveArm("close")
+            time.sleep(.5)
             self.bot.moveArm("retract")
+            self.bot.tiltHead("mid", 'center')
             self.tasks=self.tasks[1:]
             self.phone.sendData("Thank you for your service")
 
-        else if foundColor == False:
-            count = 0
+        elif self.found == False:
+            self.count = 0
 
         else:
             pass
@@ -310,7 +329,7 @@ def main():
     # allow the camera to warmup
     time.sleep(0.1)
 
-    IP = '10.200.3.102'
+    IP = '10.200.50.179'
     PORT = 5010
     phone = client.ClientSocket(IP, PORT)
 
