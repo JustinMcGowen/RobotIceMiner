@@ -237,13 +237,17 @@ class WhereAmI():
         else:
             foundColor = False
 
-        if foundColor == False:
-            count = 0
-        else if foundColor == True and count == 75:
+        if foundColor == True and count == 75:
             self.bot.moveArm("close")
             self.bot.moveArm("retract")
             self.tasks=self.tasks[1:]
             self.phone.sendData("Thank you for your service")
+            
+        else if foundColor == False:
+            count = 0
+
+        else:
+            pass
 
     def dropPayload(self,frame):
         pass
