@@ -10,6 +10,7 @@ import maestro
 import select
 import client
 import threading
+import random
 
 
 #the tango bot drives and waits on timer threads so we can still capture frames
@@ -37,6 +38,7 @@ class RobotDriver():
         self.motorValues=[self.motors, self.turn, self.body, self.headTilt, self.headTurn, self.arm, self.hand]
         self.timer = Timer(.5)
         self.lastCommandTime = 0
+        self.travelDir=0 #memory for if it is going in positive direction/angle or negative
 
         for i in range(len(self.motorList)-2):
             self.tango.setTarget(self.motorList[i], self.motorValues[i])
@@ -64,7 +66,7 @@ class RobotDriver():
     def move(self,dist,velocity):
         if dist < 0.25 and dist > -0.25: #if we are within a quarter meter of our target, stop motors
             self.killMotors()
-            return 'there'
+            return dist
         else:
             drive_time=dist/velocity
 
@@ -73,22 +75,31 @@ class RobotDriver():
                 drive_time=0-drive_time
                 DRIVE=0-DRIVE
             if not self.timer.isAlive(): #dont send more wait commands to motors if they are already moving
+                self.lastCommandTime=time.time()
                 #self.timer.join()
                 print('starting thread')
                 self.timer = Timer(drive_time)
                 self.timer.start()
                 self.motors=6000-DRIVE
+                if DRIVE<0:
+                    self.travelDir=-1
+                else:
+                    self.travelDir=1
                 self.motorValues=[self.motors, self.turn, self.body, self.headTilt, self.headTurn, self.arm, self.hand]
                 self.tango.setTarget(self.motorList[0], self.motorValues[0])
-            return 'not there'
+            newDist=(time.time()-self.lastCommandTime)*velocity
+            if self.travelDir==-1:
+                newDist=0-newDist
+            self.lastCommandTime=time.time()
+            return newDist
 
     def rotate(self,angle,desired,velocity):
         if desired-angle<5 and desired-angle>-5: #if we are within 5 degrees of our target, stop motors
             self.killMotors()
-            return 'there'
+            return desired-angle
         else:
             rotate_time = (desired-angle)/velocity
-            TURN=800
+            TURN=1000
             if rotate_time<0: #if time ends up being negative, make it positive, but turn the other direction
                 rotate_time=0-rotate_time
                 TURN=0-TURN
@@ -96,11 +107,19 @@ class RobotDriver():
                 self.lastCommandTime=time.time()
                 #timer.join()
                 self.timer = Timer(rotate_time)
-                timer.start()
+                self.timer.start()
                 self.turn=6000+TURN
+                if TURN<0:
+                    self.travelDir=-1
+                else:
+                    self.travelDir=1
                 self.motorValues=[self.motors, self.turn, self.body, self.headTilt, self.headTurn, self.arm, self.hand]
                 self.tango.setTarget(self.motorList[1], self.motorValues[1])
-            return 'not there'
+        newAngle=(time.time()-self.lastCommandTime)*velocity
+        if self.travelDir==-1:
+            newAngle=0-newAngle
+        self.lastCommandTime=time.time()
+        return newAngle
 
     def killMotors(self):
         self.DRIVE = 6000
@@ -119,7 +138,7 @@ class RobotDriver():
         if pos == 'mid':
             self.headTilt = 6000
         if pos == 'high':
-            self.headTilt = 7400 #0r 4600
+            self.headTilt = 7000 #0r 4600
         if turn == 'center':
             self.headTurn= 6000
         if turn == 'left':
@@ -146,13 +165,13 @@ class RobotDriver():
 class WhereAmI():
     def __init__(self, phone):
         self.phone=phone
-        self.angle = -1
+        self.angle = 0
         self.x = -1
         self.y = -1
         self.fps = 0.8  #feet per second (.8fps at default)
-        self.dps = -1  #degrees per second
+        self.dps = 40  #degrees per second
         self.hasIce = False
-        self.tasks = ['verify color']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
+        self.tasks = ['enter obstacle stage']#'find human','verify color']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
         self.location = 'start' #can be start, intermediate, end
         self.commandExcecuted=False
         self.found=False
@@ -196,32 +215,103 @@ class WhereAmI():
         #current pos is x=0,y=0, angle is 180 degrees
         #rotate so angle is 0
     def navigate(self,frame):
-        if not hasIce:
-            self.phone.sendData("Now entering the mining area")
+
+        self.bot.tiltHead('low', 'center')
+
+        if not self.hasIce:
+            crop = frame[430:480, 145:485]
+            gray= cv2.cvtColor(crop,cv2.COLOR_BGR2GRAY)
+            mask = cv2.inRange(crop,(200,200,200),(255,255,255))  #FIX color bounds for pink line
+            mask_rgb=cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
+            pink = crop & mask_rgb
+            cv2.imshow('pink',pink)
+            #if pink line detected
+            for i in pink:
+                if i.any()!=0:
+                    self.bot.move(2,self.fps)
+                    self.tasks=self.tasks[1:]
+                    self.phone.sendData("Now entering the mining area")
+                    time.sleep(3)
+                    self.bot.killMotors()
+                    return
         else:
-            pass
+            crop = frame[430:480, 145:485]
+            gray= cv2.cvtColor(crop,cv2.COLOR_BGR2GRAY)
+            mask = cv2.inRange(crop,(200,200,200),(255,255,255))  #FIX color bounds for blue line
+            mask_rgb=cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
+            blue = crop & mask_rgb
+            #if blue line detected
+            for i in blue:
+                if i.any()!=0:
+                    self.bot.move(2,self.fps)
+                    self.tasks=self.tasks[1:]
+                    self.phone.sendData("Back at starting area")
+                    time.sleep(3)
+                    self.bot.killMotors()
+                    return
+
+        gray= cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
+        mask = cv2.inRange(frame,(200,200,200),(255,255,255))
+        mask_rgb=cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
+        frame = frame & mask_rgb
+        #cv2.circle(frame, (145,440), 5, (255,0,0)) #480
+        #cv2.circle(frame, (485,440), 5, (255,0,0))
+        crop_right = frame[430:480, 145:315]  #315 center
+        crop_left = frame[430:480, 315:485]
+        obsR=False
+        obsL=False
+        for i in crop_right:
+            if i.any()!=0:
+                obsR=True
+                break
+        for i in crop_left:
+            if i.any()!=0:
+                obsL=True
+                break
+        if obsL and obsR:
+            self.bot.move(-2,self.fps)
+            time.sleep(1.5)
+            rando=random.randrange(-40,40)
+            self.angle=self.angle+self.bot.rotate(self.angle,self.angle+rando,dps)
+        elif obsL:
+            self.angle=self.angle+self.bot.rotate(self.angle,self.angle-15,dps)
+        elif obsR:
+            self.angle=self.angle+self.bot.rotate(self.angle,self.angle+15,dps)
+        else:
+            self.bot.move(1,self.fps)
+
+
+        cv2.imshow('binary',frame)
+
     def findHuman(self,frame):
         face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-        #cv2.imshow("findHuman",frame)
-
-        for (x,y,w,h) in faces:
-            cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0))
 
         self.bot.tiltHead('high', 'center')
 
-        if self.angle>=170:
-            self.bot.rotate(self.angle,-180,self.dps)
-        else:
-            self.bot.rotate(self.angle,180,self.dps)
-        #self.bot.rotate(self.angle,)
-
+        #found = False
         for (x,y,w,h) in faces:
-            print("("+str(x)+","+str(y)+") w="+str(w)+" h="+str(h))
-            if w >= 89 and w <= 120:
+            self.found = True
+            self.angle = self.angle + self.bot.rotate(self.angle,self.angle,self.dps)
+            #print("("+str(x)+","+str(y)+") w="+str(w)+" h="+str(h))
+            if w >= 95 and w <= 130:
                 self.tasks=self.tasks[1:]
                 self.phone.sendData("I crave that pink ice")
+                self.fount=False
+            elif w < 95:
+                self.bot.move(.75,self.fps)
+            elif w > 130:
+                self.bot.move(-.75,self.fps)
+
+        if self.angle>=80 and not self.found:
+            self.angle=self.angle+self.bot.rotate(self.angle,-90,self.dps)
+        elif not self.found:
+            self.angle=self.angle+self.bot.rotate(self.angle,90,self.dps)
+        #print(self.angle)
+        #self.bot.rotate(self.angle,)
+
+        #cv2.imshow("findHuman",frame)
 
 
     def detectBall(self,frame):
@@ -230,7 +320,7 @@ class WhereAmI():
         self.bot.moveArm("extend")
         self.bot.tiltHead("low", 'right')
 
-        brightness=40
+        brightness=60
         frame=np.int16(frame)
         frame=frame-brightness
         frame=np.clip(frame,0,255)
@@ -252,7 +342,7 @@ class WhereAmI():
         conts,h=cv2.findContours(maskFinal.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
 
         cv2.drawContours(frame,conts,-1,(255,0,0),3)
-        cv2.imshow('test',frame)
+        #cv2.imshow('test',frame)
         #print(len(conts))
         if len(conts) >= 1:
             self.count +=1
@@ -263,7 +353,8 @@ class WhereAmI():
         else:
             self.found = False
 
-        if self.found == True and self.count == 32:
+        if self.found == True and self.count == 16:
+            self.hasIce=True
             self.bot.moveArm("close")
             time.sleep(.5)
             self.bot.moveArm("retract")
@@ -282,7 +373,15 @@ class WhereAmI():
 
     def testSpeed(self):
         print('start test')
-        '''self.bot.move(2,self.fps)
+
+        self.bot.motorValues[1]=7000
+        self.bot.tango.setTarget(self.bot.motorList[1], self.bot.motorValues[1])
+        time.sleep(4)
+        self.bot.motorValues[1]=6000
+        self.bot.tango.setTarget(self.bot.motorList[1], self.bot.motorValues[1])
+
+        '''#speed test
+        self.bot.move(2,self.fps)
         for i in range(40):
             time.sleep(.1)
             self.bot.move(2-(.8*.1*i),self.fps)
