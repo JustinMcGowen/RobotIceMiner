@@ -36,6 +36,7 @@ class RobotDriver():
         self.motorList=[m, bodyTurn, b, tilt, turn, arm, hand]
         self.motorValues=[self.motors, self.turn, self.body, self.headTilt, self.headTurn, self.arm, self.hand]
         self.timer = Timer(.5)
+        self.lastCommandTime = 0
 
         for i in range(len(self.motorList)-2):
             self.tango.setTarget(self.motorList[i], self.motorValues[i])
@@ -92,6 +93,7 @@ class RobotDriver():
                 rotate_time=0-rotate_time
                 TURN=0-TURN
             if not self.timer.isAlive(): #dont send more wait commands to motors if they are already moving
+                self.lastCommandTime=time.time()
                 #timer.join()
                 self.timer = Timer(rotate_time)
                 timer.start()
@@ -143,7 +145,7 @@ class WhereAmI():
         self.fps = 0.8  #feet per second (.8fps at default)
         self.dps = -1  #degrees per second
         self.hasIce = False
-        self.tasks = ['test']#'find human']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
+        self.tasks = ['find human']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
         self.location = 'start' #can be start, intermediate, end
         self.commandExcecuted=False
         self.found=False
@@ -194,10 +196,17 @@ class WhereAmI():
         face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-        cv2.imshow("findHuman",frame)
+        #cv2.imshow("findHuman",frame)
+
+        for (x,y,w,h) in faces:
+            cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0))
 
         self.bot.tiltHead('high')
 
+        if self.angle>=170:
+            self.bot.rotate(self.angle,-180,self.dps)
+        else:
+            self.bot.rotate(self.angle,180,self.dps)
         #self.bot.rotate(self.angle,)
 
         for (x,y,w,h) in faces:
@@ -225,7 +234,7 @@ class WhereAmI():
 
         maskFinal=maskClose
         conts,h=cv2.findContours(maskFinal.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
-    
+
         cv2.drawContours(frame,conts,-1,(255,0,0),3)
         print(len(conts))
         if len(conts) == 1:
@@ -248,7 +257,6 @@ class WhereAmI():
 
         else:
             pass
-
     def dropPayload(self,frame):
         pass
 
