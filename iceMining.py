@@ -66,11 +66,12 @@ class RobotDriver():
     def move(self,dist,velocity):
         if dist < 0.25 and dist > -0.25: #if we are within a quarter meter of our target, stop motors
             self.killMotors()
+            self.timer = Timer(0)
             return dist
         else:
             drive_time=dist/velocity
 
-            DRIVE=800
+            DRIVE=500
             if drive_time<0: #if time ends up being negative, make it positive, but turn the other direction
                 drive_time=0-drive_time
                 DRIVE=0-DRIVE
@@ -96,10 +97,11 @@ class RobotDriver():
     def rotate(self,angle,desired,velocity):
         if desired-angle<5 and desired-angle>-5: #if we are within 5 degrees of our target, stop motors
             self.killMotors()
+            self.timer = Timer(0)
             return desired-angle
         else:
             rotate_time = (desired-angle)/velocity
-            TURN=1000
+            TURN=900
             if rotate_time<0: #if time ends up being negative, make it positive, but turn the other direction
                 rotate_time=0-rotate_time
                 TURN=0-TURN
@@ -123,8 +125,6 @@ class RobotDriver():
 
     def killMotors(self):
         self.DRIVE = 6000
-        self.headTurn = 6000
-        self.headTilt = 6500
         self.motors = 6000
         self.turn = 6000
         self.motorValues=[self.motors, self.turn, self.body, self.headTilt, self.headTurn, self.arm, self.hand]
@@ -168,11 +168,11 @@ class WhereAmI():
         self.angle = 0
         self.x = -1
         self.y = -1
-        self.fps = 0.8  #feet per second (.8fps at default)
-        self.dps = 40  #degrees per second
+        self.fps = 2  #feet per second (.8fps at default)
+        self.dps =30  #degrees per second
         self.hasIce = False
-        self.tasks = ['enter obstacle stage']#'find human','verify color']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
-        self.location = 'start' #can be start, intermediate, end
+        self.tasks = ['probe position','enter obstacle stage','find human','verify color','enter obstacle stage','drop payload']#['probe position','move to start','probe speed','enter obstacle stage','find human','verify color','traverse obstacles','drop payload']
+        #self.location = 'start' #can be start, intermediate, end
         self.commandExcecuted=False
         self.found=False
         self.timeStart = time.time()
@@ -204,7 +204,47 @@ class WhereAmI():
             self.testSpeed()
 
     def findStart(self,frame):
-        pass
+            brightness=60
+            frame=np.int16(frame)
+            frame=frame-brightness
+            frame=np.clip(frame,0,255)
+            frame=np.uint8(frame)
+
+            kernelOpen=np.ones((5,5))
+            kernelClose=np.ones((20,20))
+            #pink boundaries
+            upperPink=np.array([180,255,255])
+            lowerPink=np.array([150,180,180])
+            imgHSV= cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
+            # create the Mask
+            mask=cv2.inRange(imgHSV,lowerPink,upperPink)
+            #morphology
+            maskOpen=cv2.morphologyEx(mask,cv2.MORPH_OPEN,kernelOpen)
+            maskClose=cv2.morphologyEx(maskOpen,cv2.MORPH_CLOSE,kernelClose)
+
+            maskFinal=maskClose
+            conts,h=cv2.findContours(maskFinal.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+
+            cv2.drawContours(frame,conts,-1,(255,0,0),3)
+            #cv2.imshow('test',frame)
+            #print(len(conts))
+            if len(conts) >= 1:
+                self.count +=1
+                #print(self.count)
+                self.found = True
+                for i in range(len(conts)):
+                    x,y,w,h=cv2.boundingRect(conts[i])
+            else:
+                self.found = False
+
+            if self.found == True:
+                self.bot.move(2,self.fps)
+                self.tasks=self.tasks[1:]
+                self.phone.sendData("Avoiding Obstacles")
+                self.found=False
+            else:
+                self.angle=self.angle+self.bot.rotate(self.angle,self.angle+15,self.dps)
+
         #rotate until panel detected
         #drive in front of panel (smaller color is far away and will dictate front)
         #center body to panel (can use neck so we dont have to parallel park)
@@ -214,42 +254,49 @@ class WhereAmI():
         #rotate @ angular velocities 1,2,and 3 for .5 second and triangulate angle multiplied by two, that is self.dps (degrees per second)
         #current pos is x=0,y=0, angle is 180 degrees
         #rotate so angle is 0
+
+
     def navigate(self,frame):
 
         self.bot.tiltHead('low', 'center')
 
         if not self.hasIce:
-            crop = frame[430:480, 145:485]
-            gray= cv2.cvtColor(crop,cv2.COLOR_BGR2GRAY)
-            mask = cv2.inRange(crop,(200,200,200),(255,255,255))  #FIX color bounds for pink line
-            mask_rgb=cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
-            pink = crop & mask_rgb
-            cv2.imshow('pink',pink)
+            crop = frame[420:480, 145:485]
+            #hsv= cv2.cvtColor(crop,cv2.COLOR_BGR2HSV)
+            mask = cv2.inRange(crop,np.array([71,170,186]),np.array([128,240,255]))#crop,np.array([0,172,156]),np.array([25,255,155]))  #FIX color bounds for orange line
+            #mask_rgb=cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
+            #pink = crop & mask_rgb
+            orange=cv2.erode(mask,np.ones((5,5),np.uint8),iterations=1)
+            cv2.imshow('orange',orange)
             #if pink line detected
-            for i in pink:
+            for i in orange:
                 if i.any()!=0:
                     self.bot.move(2,self.fps)
                     self.tasks=self.tasks[1:]
                     self.phone.sendData("Now entering the mining area")
-                    time.sleep(3)
+                    time.sleep(2/self.fps+.1)
                     self.bot.killMotors()
                     return
         else:
-            crop = frame[430:480, 145:485]
-            gray= cv2.cvtColor(crop,cv2.COLOR_BGR2GRAY)
-            mask = cv2.inRange(crop,(200,200,200),(255,255,255))  #FIX color bounds for blue line
-            mask_rgb=cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
-            blue = crop & mask_rgb
+            crop = frame[420:480, 145:485]
+            #hsv=cv2.cvtColor(crop,cv2.COLOR_BGR2HSV)
+            #gray= cv2.cvtColor(crop,cv2.COLOR_BGR2GRAY)
+            mask = cv2.inRange(crop,np.array([83,100,215]),np.array([170,170,255]))#crop,np.array([76,147,0]),np.array([102,223,160]))  #FIX color bounds for blue line Done?
+            #mask_rgb=cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
+            #blue = hsv & mask_rgb
+            pink=cv2.erode(mask,np.ones((5,5),np.uint8),iterations=1)
+            #cv2.imshow('blue',blue)
             #if blue line detected
-            for i in blue:
+            for i in pink:
                 if i.any()!=0:
                     self.bot.move(2,self.fps)
                     self.tasks=self.tasks[1:]
                     self.phone.sendData("Back at starting area")
-                    time.sleep(3)
+                    time.sleep(2/self.fps+.1)
                     self.bot.killMotors()
                     return
 
+        pic=frame
         gray= cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
         mask = cv2.inRange(frame,(200,200,200),(255,255,255))
         mask_rgb=cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
@@ -269,14 +316,16 @@ class WhereAmI():
                 obsL=True
                 break
         if obsL and obsR:
+            self.angle=self.angle+self.bot.rotate(self.angle,self.angle,self.dps)
+            self.bot.move(0,self.fps)
             self.bot.move(-2,self.fps)
-            time.sleep(1.5)
+            time.sleep(2/self.fps+.01)
             rando=random.randrange(-40,40)
-            self.angle=self.angle+self.bot.rotate(self.angle,self.angle+rando,dps)
+            self.angle=self.angle+self.bot.rotate(self.angle,self.angle+rando,self.dps)
         elif obsL:
-            self.angle=self.angle+self.bot.rotate(self.angle,self.angle-15,dps)
+            self.angle=self.angle+self.bot.rotate(self.angle,self.angle+15,self.dps)
         elif obsR:
-            self.angle=self.angle+self.bot.rotate(self.angle,self.angle+15,dps)
+            self.angle=self.angle+self.bot.rotate(self.angle,self.angle-15,self.dps)
         else:
             self.bot.move(1,self.fps)
 
@@ -330,7 +379,7 @@ class WhereAmI():
         kernelClose=np.ones((20,20))
         #pink boundaries
         upperPink=np.array([180,255,255])
-        lowerPink=np.array([100,100,100])
+        lowerPink=np.array([150,180,180])
         imgHSV= cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
         # create the Mask
         mask=cv2.inRange(imgHSV,lowerPink,upperPink)
@@ -361,6 +410,9 @@ class WhereAmI():
             self.bot.tiltHead("mid", 'center')
             self.tasks=self.tasks[1:]
             self.phone.sendData("Thank you for your service")
+            self.angle=self.angle+self.bot.rotate(self.angle,self.angle+180,self.dps)
+            time.sleep(180/self.dps+.1)
+            self.bot.killMotors()
 
         elif self.found == False:
             self.count = 0
@@ -368,10 +420,43 @@ class WhereAmI():
         else:
             pass
     def dropPayload(self,frame):
-        pass
+        #self.phone.sendData("Time to deliver that ice")
+        kernelOpen=np.ones((5,5))
+        kernelClose=np.ones((20,20))
+        #pink boundaries
+        upperPink=np.array([180,255,255])
+        lowerPink=np.array([100,100,100])
+        imgHSV= cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
+        # create the Mask
+        mask=cv2.inRange(imgHSV,lowerPink,upperPink)
+        #morphology
+        maskOpen=cv2.morphologyEx(mask,cv2.MORPH_OPEN,kernelOpen)
+        maskClose=cv2.morphologyEx(maskOpen,cv2.MORPH_CLOSE,kernelClose)
+
+        maskFinal=maskClose
+        conts,h=cv2.findContours(maskFinal.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+
+        cv2.drawContours(frame,conts,-1,(255,0,0),3)
+        print(len(conts))
+        if len(conts) == 1:
+            #print(cont)
+            self.found = True
+            for i in range(len(conts)):
+                #x,y,w,h=cv2.boundingRect(conts[i])
+                self.bot.move(2,self.fps)
+                time.sleep(2/self.fps+.1)
+                self.bot.killMotors()
+                self.tasks=self.tasks[1:]
+                self.phone.sendData("Dropping Payload")
+                self.bot.moveArm("extend")
+                time.sleep(.3)
+                self.bot.moveArm("open")
+
+        else:
+            self.found = False
 
 
-    def testSpeed(self):
+def testSpeed(self):
         print('start test')
 
         self.bot.motorValues[1]=7000
@@ -428,7 +513,7 @@ def main():
     # allow the camera to warmup
     time.sleep(0.1)
 
-    IP = '10.200.50.179'
+    IP = '10.200.23.235'
     PORT = 5010
     phone = client.ClientSocket(IP, PORT)
 
