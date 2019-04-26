@@ -203,8 +203,7 @@ class WhereAmI():
         elif self.tasks[0]=='test':
             self.testSpeed()
 
-    def findStart(self,frame):
-        pass
+    
         #rotate until panel detected
         #drive in front of panel (smaller color is far away and will dictate front)
         #center body to panel (can use neck so we dont have to parallel park)
@@ -312,7 +311,47 @@ class WhereAmI():
         #self.bot.rotate(self.angle,)
 
         #cv2.imshow("findHuman",frame)
+    #Finding the start when we find the pink box, and when the pink box is found rotate 180 degrees to start to go through course
+    #and then we willl move 2 feet forward to Detect human face
 
+    def findStart(self,frame):
+        self.phone.sendData("Put me in coach")
+
+        kernelOpen=np.ones((5,5))
+        kernelClose=np.ones((20,20))
+
+        #pink boundaries
+        upperPink=np.array([180,255,255])
+        lowerPink=np.array([100,100,100])
+        imgHSV= cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
+
+        # create the Mask
+        mask=cv2.inRange(imgHSV,lowerPink,upperPink)
+        
+        #morphology
+        maskOpen=cv2.morphologyEx(mask,cv2.MORPH_OPEN,kernelOpen)
+        maskClose=cv2.morphologyEx(maskOpen,cv2.MORPH_CLOSE,kernelClose)
+
+        maskFinal=maskClose
+        conts,h=cv2.findContours(maskFinal.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+
+        cv2.drawContours(frame,conts,-1,(255,0,0),3)
+
+        #If the pink box is found we will want to rotate and move
+        if len(conts) >= 1:
+            for i in range(len(conts)):
+                x,y,w,h=cv2.boundingRect(conts[i])
+
+            self.bot.rotate(self.angle,180,self.dps)
+            time.sleep(1.5)
+            self.bot.move(2,self.fps)
+            time.sleep(.5)
+            self.phone.sendData("Starting area has been found")
+            self.tasks=self.tasks[1:]
+
+        #More of a test statement to know it isn't owkring but generally the if statement should always work
+        else:
+            self.phone.sendData("I can't seem to find a pink box")
 
     def detectBall(self,frame):
         #Human should have already been found
